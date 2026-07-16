@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:record/record.dart';
@@ -7,6 +6,29 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:file_selector/file_selector.dart';
 import '../services/tflite_service.dart';
+
+// 📦 1. สร้างคลาสสำหรับเก็บข้อมูลแต่ละ Record แบบละเอียด
+class ScanRecord {
+  final String id;
+  final String date;
+  final String result;
+  final String status;
+  final double youngProb;
+  final double perfectProb;
+  final double oldProb;
+  final double noiseFilterLevel;
+
+  ScanRecord({
+    required this.id,
+    required this.date,
+    required this.result,
+    required this.status,
+    required this.youngProb,
+    required this.perfectProb,
+    required this.oldProb,
+    required this.noiseFilterLevel,
+  });
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -38,13 +60,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Timer? _waveformTimer;
   List<double> _waveformData = List.filled(40, 0.0);
 
-  final List<Map<String, String>> _mockHistory = [
-    {"date": "16 ก.ค. 2026 - 10:30 น.", "result": "สุกพอดี", "status": "perfect"},
-    {"date": "15 ก.ค. 2026 - 14:15 น.", "result": "มะพร้าวอ่อน", "status": "young"},
-    {"date": "14 ก.ค. 2026 - 09:00 น.", "result": "มะพร้าวแก่", "status": "old"},
-    {"date": "12 ก.ค. 2026 - 16:45 น.", "result": "สุกพอดี", "status": "perfect"},
-    {"date": "10 ก.ค. 2026 - 11:20 น.", "result": "มะพร้าวอ่อน", "status": "young"},
-    {"date": "08 ก.ค. 2026 - 13:10 น.", "result": "สุกพอดี", "status": "perfect"},
+  // 📦 2. สร้าง Mockup Data และระบบ Running ID อัตโนมัติ
+  int _runningId = 4; // เลขรันนิ่งถัดไปที่จะถูกบันทึก (เพราะมี 1-3 แล้ว)
+  final List<ScanRecord> _historyRecords = [
+    ScanRecord(id: "REC-003", date: "16 ก.ค. 2569 - 10:30 น.", result: "สุกพอดี", status: "perfect", youngProb: 0.15, perfectProb: 0.80, oldProb: 0.05, noiseFilterLevel: 50.0),
+    ScanRecord(id: "REC-002", date: "15 ก.ค. 2569 - 14:15 น.", result: "มะพร้าวอ่อน", status: "young", youngProb: 0.85, perfectProb: 0.10, oldProb: 0.05, noiseFilterLevel: 45.0),
+    ScanRecord(id: "REC-001", date: "14 ก.ค. 2569 - 09:00 น.", result: "มะพร้าวแก่", status: "old", youngProb: 0.02, perfectProb: 0.18, oldProb: 0.80, noiseFilterLevel: 60.0),
   ];
 
   @override
@@ -97,11 +118,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           double normalized = (amp.current + 60) / 60;
           if (normalized < 0.05) normalized = 0.05;
           if (normalized > 1.0) normalized = 1.0;
-          
           _waveformData.add(normalized);
-          if (_waveformData.length > 40) {
-            _waveformData.removeAt(0);
-          }
+          if (_waveformData.length > 40) _waveformData.removeAt(0);
         });
       }
     });
@@ -123,14 +141,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         if (await _audioRecorder.hasPermission()) {
           final dir = await getApplicationDocumentsDirectory();
           final filePath = '${dir.path}/coconut_single_record.wav';
-
-          await _audioRecorder.start(
-            const RecordConfig(encoder: AudioEncoder.wav), 
-            path: filePath
-          );
-          
+          await _audioRecorder.start(const RecordConfig(encoder: AudioEncoder.wav), path: filePath);
           _startWaveformTimer();
-
           setState(() {
             _isRecording = true;
             _audioPath = null;
@@ -185,40 +197,144 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     });
   }
 
-  Widget _buildProbBar(String label, double prob, Color color) {
+  // 💾 3. ฟังก์ชันบันทึกข้อมูลเมื่อกดยืนยันการวิเคราะห์
+  void _saveRecord() {
+    // 3.1 สร้างวันที่แบบไทย
+    DateTime now = DateTime.now();
+    List<String> months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+    String formattedDate = "${now.day} ${months[now.month - 1]} ${now.year + 543} - ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')} น.";
+    
+    // 3.2 เจน Running ID (เช่น REC-004)
+    String newId = "REC-${_runningId.toString().padLeft(3, '0')}";
+    _runningId++;
+
+    // 3.3 ตีความสถานะ
+    String status = "perfect";
+    if (_resultText.contains("อ่อน")) status = "young";
+    else if (_resultText.contains("แก่")) status = "old";
+
+    // 3.4 เพิ่มเข้าคลัง
+    setState(() {
+      _historyRecords.insert(0, ScanRecord(
+        id: newId,
+        date: formattedDate,
+        result: _resultText,
+        status: status,
+        youngProb: _youngProb,
+        perfectProb: _perfectProb,
+        oldProb: _oldProb,
+        noiseFilterLevel: _noiseCancellationLevel,
+      ));
+      
+      // ล้างค่าเพื่อให้พร้อมสแกนลูกถัดไป
+      _hasResult = false;
+      _audioPath = null;
+      _resultText = "บันทึกผล $newId สำเร็จ!";
+    });
+
+    // 3.5 เด้งแจ้งเตือน
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('✅ บันทึกข้อมูล $newId ลงคลังสถิติเรียบร้อย'),
+        backgroundColor: const Color(0xFF10B981),
+        behavior: SnackBarBehavior.floating,
+      )
+    );
+  }
+
+  // 🔍 4. ฟังก์ชันเปิดดูรายละเอียด (Bottom Sheet) แบบหรูหรา
+  void _showRecordDetails(ScanRecord record) {
+    Color statusColor = record.status == "perfect" ? const Color(0xFF10B981) : record.status == "young" ? const Color(0xFF3B82F6) : const Color(0xFFF59E0B);
+    IconData statusIcon = record.status == "perfect" ? Icons.check_circle_rounded : record.status == "young" ? Icons.water_drop_rounded : Icons.wb_sunny_rounded;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 50, height: 5, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+            const SizedBox(height: 20),
+            
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(record.id, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey)),
+                Text(record.date, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+              ],
+            ),
+            const SizedBox(height: 20),
+            
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+              decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: statusColor.withOpacity(0.3))),
+              child: Row(
+                children: [
+                  Icon(statusIcon, color: statusColor, size: 48),
+                  const SizedBox(width: 16),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text("ผลวิเคราะห์ AI", style: TextStyle(color: Colors.black54, fontSize: 14)),
+                      Text(record.result, style: TextStyle(color: statusColor, fontSize: 24, fontWeight: FontWeight.bold)),
+                    ],
+                  )
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            _buildProbBar("มะพร้าวอ่อน", record.youngProb, const Color(0xFF3B82F6), isMockResult: true),
+            _buildProbBar("สุกพอดี", record.perfectProb, const Color(0xFF10B981), isMockResult: true),
+            _buildProbBar("มะพร้าวแก่", record.oldProb, const Color(0xFFF59E0B), isMockResult: true),
+            
+            const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Divider(color: Colors.black12)),
+            
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text("ระดับการตัดเสียงรบกวน (Noise Filter)", style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87)),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(10)),
+                  child: Text("${record.noiseFilterLevel.toInt()}%", style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF059669))),
+                )
+              ],
+            ),
+            const SizedBox(height: 30),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ปรับ _buildProbBar ให้รองรับการทำงานตอนเปิดดูย้อนหลัง
+  Widget _buildProbBar(String label, double prob, Color color, {bool isMockResult = false}) {
+    bool shouldShow = isMockResult || _hasResult;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          SizedBox(
-            width: 75, 
-            child: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey.shade700))
-          ),
+          SizedBox(width: 75, child: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey.shade700))),
           Expanded(
             child: Stack(
               children: [
-                Container(
-                  height: 14,
-                  decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(10)),
-                ),
+                Container(height: 14, decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(10))),
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 800),
                   curve: Curves.fastOutSlowIn,
                   height: 14,
-                  width: (_hasResult ? prob : 0) * 200, 
+                  width: (shouldShow ? prob : 0) * 200, 
                   decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(10)),
                 ),
               ],
             ),
           ),
-          SizedBox(
-            width: 45, 
-            child: Text(
-              " ${(_hasResult ? prob * 100 : 0).toInt()}%", 
-              textAlign: TextAlign.right, 
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color)
-            )
-          ),
+          SizedBox(width: 45, child: Text(" ${(shouldShow ? prob * 100 : 0).toInt()}%", textAlign: TextAlign.right, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color))),
         ],
       ),
     );
@@ -228,7 +344,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     bool hasFile = _audioPath != null;
 
     return SafeArea(
-      // ⚠️ ครอบด้วย SingleChildScrollView เพื่อแก้ปัญหาจอล้น (Scroll ได้)
       child: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
         child: Padding(
@@ -291,11 +406,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       borderRadius: BorderRadius.circular(24),
                       border: _hasResult ? Border.all(color: const Color(0xFF059669).withOpacity(0.3), width: 2) : null,
                       boxShadow: [
-                        BoxShadow(
-                          color: _hasResult ? const Color(0xFF059669).withOpacity(0.1) : Colors.grey.shade200, 
-                          blurRadius: 20, 
-                          spreadRadius: 5
-                        )
+                        BoxShadow(color: _hasResult ? const Color(0xFF059669).withOpacity(0.1) : Colors.grey.shade200, blurRadius: 20, spreadRadius: 5)
                       ],
                     ),
                     child: Column(
@@ -320,6 +431,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                           _buildProbBar("มะพร้าวอ่อน", _youngProb, const Color(0xFF3B82F6)),
                           _buildProbBar("สุกพอดี", _perfectProb, const Color(0xFF10B981)),
                           _buildProbBar("มะพร้าวแก่", _oldProb, const Color(0xFFF59E0B)),
+                          
+                          // 💾 ปุ่มบันทึก จะโผล่มาเมื่อวิเคราะห์เสร็จ
+                          const SizedBox(height: 20),
+                          ElevatedButton.icon(
+                            onPressed: _saveRecord,
+                            icon: const Icon(Icons.bookmark_add_rounded),
+                            label: const Text('บันทึกผลลงคลังสถิติ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF059669),
+                              foregroundColor: Colors.white,
+                              elevation: 2,
+                              minimumSize: const Size(double.infinity, 50),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            ),
+                          )
                         ]
                       ],
                     ),
@@ -374,11 +500,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     ],
                   ),
                   child: Center(
-                    child: Icon(
-                      _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
-                      color: Colors.white,
-                      size: 42,
-                    ),
+                    child: Icon(_isRecording ? Icons.stop_rounded : Icons.mic_rounded, color: Colors.white, size: 42),
                   ),
                 ),
               ),
@@ -453,10 +575,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildHistoryScreen() {
-    int totalCount = _mockHistory.length;
-    int youngCount = _mockHistory.where((item) => item["status"] == "young").length;
-    int perfectCount = _mockHistory.where((item) => item["status"] == "perfect").length;
-    int oldCount = _mockHistory.where((item) => item["status"] == "old").length;
+    int totalCount = _historyRecords.length;
+    int youngCount = _historyRecords.where((item) => item.status == "young").length;
+    int perfectCount = _historyRecords.where((item) => item.status == "perfect").length;
+    int oldCount = _historyRecords.where((item) => item.status == "old").length;
 
     return SafeArea(
       child: Column(
@@ -529,31 +651,36 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-              itemCount: _mockHistory.length,
+              itemCount: _historyRecords.length,
               itemBuilder: (context, index) {
-                final item = _mockHistory[index];
+                final item = _historyRecords[index];
                 
-                Color statusColor = item["status"] == "perfect" ? const Color(0xFF10B981) 
-                                  : item["status"] == "young" ? const Color(0xFF3B82F6) 
+                Color statusColor = item.status == "perfect" ? const Color(0xFF10B981) 
+                                  : item.status == "young" ? const Color(0xFF3B82F6) 
                                   : const Color(0xFFF59E0B);
-                IconData statusIcon = item["status"] == "perfect" ? Icons.check_circle_rounded 
-                                    : item["status"] == "young" ? Icons.water_drop_rounded 
+                IconData statusIcon = item.status == "perfect" ? Icons.check_circle_rounded 
+                                    : item.status == "young" ? Icons.water_drop_rounded 
                                     : Icons.wb_sunny_rounded;
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 12),
                   elevation: 0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.grey.shade200)),
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    leading: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: statusColor.withOpacity(0.1), shape: BoxShape.circle),
-                      child: Icon(statusIcon, color: statusColor, size: 22),
+                  child: InkWell(
+                    // 🔍 ทำให้กดเพื่อดูรายละเอียดได้
+                    onTap: () => _showRecordDetails(item),
+                    borderRadius: BorderRadius.circular(16),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      leading: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(color: statusColor.withOpacity(0.1), shape: BoxShape.circle),
+                        child: Icon(statusIcon, color: statusColor, size: 22),
+                      ),
+                      title: Text(item.result, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      subtitle: Text("${item.id} • ${item.date}", style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                      trailing: const Icon(Icons.info_outline_rounded, size: 20, color: Colors.grey),
                     ),
-                    title: Text(item["result"]!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    subtitle: Text(item["date"]!, style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
-                    trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
                   ),
                 );
               },

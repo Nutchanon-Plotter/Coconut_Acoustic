@@ -4,7 +4,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.flex.FlexDelegate // Import ตัวนี้ครับ
+import org.tensorflow.lite.flex.FlexDelegate
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -25,7 +25,7 @@ class MainActivity: FlutterActivity() {
                         .map(FileChannel.MapMode.READ_ONLY, assetFileDescriptor.startOffset, assetFileDescriptor.declaredLength)
 
                     val options = Interpreter.Options()
-                    options.addDelegate(FlexDelegate()) // ⚠️ นี่คือตัวแก้ปัญหา Fully Connected
+                    options.addDelegate(FlexDelegate())
                     
                     interpreter = Interpreter(mappedByteBuffer, options)
                     result.success("Model Loaded")
